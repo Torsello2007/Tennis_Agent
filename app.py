@@ -6,37 +6,45 @@ from langchain_core.messages import HumanMessage, AIMessage
 from datetime import datetime
 from duckduckgo_search import DDGS
 import json
-import time
 
 # --- CONFIGURAZIONE ---
 st.set_page_config(page_title="TennisBet AI", page_icon="🎾", layout="wide")
 
 st.markdown("""
 <style>
-/* VS Style */
 .stProgress > div > div > div > div { background-image: linear-gradient(to right, #4CAF50, #8BC34A); }
-/* Betting Style */
 .bet-box { background-color: #007bff; color: white; padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; }
 .bet-risk { background-color: #ff9800; }
+.match-time { 
+    font-size: 1.1em; 
+    color: #ffcc00; 
+    font-weight: bold; 
+    font-family: monospace; 
+    background-color: #222; 
+    padding: 4px 8px; 
+    border-radius: 4px; 
+    margin-left: 10px; 
+}
 </style>
 """, unsafe_allow_html=True)
 
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [AIMessage(content="Ciao! Sono il tuo Tennis Advisor. Preferisci giocate Audaci (rischio alto) o Prudenti (sicure)?")]
+    st.session_state.chat_history = [AIMessage(content="Ciao! Sono il tuo Tennis Advisor. Per darti i consigli migliori ho bisogno di conoscerti: preferisci giocate PRUDENTI (sicure) o AUDACI (rischiose)?")]
 if "scout_data" not in st.session_state: st.session_state.scout_data = None
 if "single_data" not in st.session_state: st.session_state.single_data = None
 
-# --- SIDEBAR ---
+# --- SIDEBAR (PULITA) ---
 with st.sidebar:
     st.title("🎾 TennisBet AI")
     api_key = st.text_input("Groq API Key:", type="password")
     st.divider()
-    manual_profile = st.selectbox("Profilo:", ["Imposta da Chat", "🛡️ PRUDENTE", "🔥 AUDACE"])
+    st.info("💡 Usa la chat per definire la tua strategia.")
+    manual_profile = "BILANCIATO" 
 
 # --- FUNZIONI ---
 def search_web(query):
     try:
-        results = DDGS().text(query, max_results=5, backend="html")
+        results = DDGS().text(query, max_results=10, backend="html")
         return str(results) if results else ""
     except: return ""
 
@@ -48,62 +56,48 @@ def extract_json(text):
     except: return None
 
 def run_advisor(mode, user_input, profile, key):
-    llm = ChatGroq(temperature=0.2, groq_api_key=key, model_name="llama-3.3-70b-versatile")
+    llm = ChatGroq(temperature=0.1, groq_api_key=key, model_name="llama-3.3-70b-versatile")
     today = datetime.now().strftime("%Y-%m-%d")
     
-    # 1. ANALISI SINGOLA
     if mode == "single":
-        with st.spinner(f"🔮 Analizzo {user_input}..."):
-            web_data = search_web(f"{user_input} tennis match prediction H2H")
-            
+        with st.spinner(f"🔮 Analisi approfondita {user_input}..."):
+            web_data = search_web(f"{user_input} tennis match preview prediction head to head")
         prompt = """
-        Sei un Esperto Tennis. Oggi: {date}.
-        Richiesta: "{query}". Dati: {context}.
-        
-        Prevedi il risultato futuro.
-        Rispondi SOLO JSON:
-        {{
-            "p1_name": "Nome1", "p1_score": 65,
-            "p2_name": "Nome2", "p2_score": 35,
-            "reason": "Motivazione tecnica..."
-        }}
+        Sei un Analista Tecnico. Oggi: {date}. Richiesta: "{query}". Dati Web: {context}.
+        Compito: Previsione dettagliata (minimo 5 righe di motivazione).
+        Rispondi SOLO JSON: {{ "p1_name": "A", "p1_score": 60, "p2_name": "B", "p2_score": 40, "reason": "..." }}
         """
         chain = ChatPromptTemplate.from_template(prompt) | llm | StrOutputParser()
         return chain.invoke({"date": today, "query": user_input, "context": web_data})
         
-    # 2. LISTA SCOMMESSE (FIX TENNIS ONLY)
     else:
-        with st.spinner("📡 Scarico quote TENNIS odierne..."):
-            # Aggiunto "ATP WTA" per forzare il tennis nella ricerca
-            web_data = search_web(f"ATP WTA Tennis matches schedule {today} order of play")
-            
-        # PROMPT BLINDATO CONTRO IL CALCIO
+        with st.spinner("📡 Scarico il palinsesto reale (ATP/WTA)..."):
+            web_data = search_web(f"tennis matches today {today} schedule betting tips odds")
         prompt = """
-        Sei un Bookmaker specializzato ESCLUSIVAMENTE in TENNIS (ATP, WTA, Challenger).
-        Oggi: {date}. Profilo: {profile}.
-        DATI CALENDARIO: {context}
+        Sei un Bookmaker. Oggi: {date}.
+        DATI WEB: {context}
         
-        Compito:
-        1. Estrai 6-8 match reali di oggi/domani.
-        2. VIETATO INSERIRE CALCIO (Premier League, Serie A, ecc.). Se leggi "Manchester", "Liverpool", "Inter", SCARTALI.
-        3. Voglio SOLO tennisti (es. Sinner, Draper, Berrettini, Sabalenka, ecc.).
-        4. Calcola quote e percentuali.
+        COMPITO:
+        1. Estrai ALMENO 5 match di tennis che si giocano OGGI o DOMANI.
+        2. FORMATO ORARIO: Scrivi SOLO L'ORA (es. "14:30" o "19:00"). NON scrivere "Oggi", "Domani" o la data.
+        3. VIETATO CALCIO.
         
         Rispondi SOLO JSON:
         {{
             "matches": [
                 {{
-                    "p1": "Sinner", "p2": "Djokovic",
-                    "p1_perc": 45, "p2_perc": 55,
-                    "bet_on": "2",
-                    "odd_value": 1.85,
-                    "reason": "Match equilibrato..."
+                    "p1": "Nome A", "p2": "Nome B",
+                    "p1_perc": 60, "p2_perc": 40,
+                    "match_time": "14:30", 
+                    "bet_on": "1",
+                    "odd_value": 1.50,
+                    "reason": "Motivo..."
                 }}
             ]
         }}
         """
         chain = ChatPromptTemplate.from_template(prompt) | llm | StrOutputParser()
-        return chain.invoke({"date": today, "profile": profile, "context": web_data})
+        return chain.invoke({"date": today, "context": web_data})
 
 # --- UI ---
 st.title("🏆 TennisBet AI")
@@ -112,8 +106,7 @@ tab1, tab2 = st.tabs(["🔮 Previsione Match", "📋 Scommesse del Giorno"])
 # TAB 1
 with tab1:
     col_in, col_btn = st.columns([4, 1])
-    match_input = col_in.text_input("Inserisci Match:", placeholder="Es: Sinner vs Alcaraz 10 Gennaio")
-    
+    match_input = col_in.text_input("Inserisci Match:", placeholder="Es: Sinner vs Alcaraz")
     if col_btn.button("ANALIZZA") and api_key and match_input:
         res = run_advisor("single", match_input, manual_profile, api_key)
         st.session_state.single_data = extract_json(res)
@@ -122,10 +115,8 @@ with tab1:
         d = st.session_state.single_data
         st.divider()
         c1, c2, c3 = st.columns([4, 1, 4])
-        
         col_p1 = "#4CAF50" if d['p1_score'] >= d['p2_score'] else "#FF5252"
         col_p2 = "#4CAF50" if d['p2_score'] > d['p1_score'] else "#FF5252"
-        
         with c1:
             st.markdown(f"<h1 style='text-align:center; color:{col_p1}'>{d['p1_score']}%</h1>", unsafe_allow_html=True)
             st.markdown(f"<h3 style='text-align:center'>{d['p1_name']}</h3>", unsafe_allow_html=True)
@@ -135,31 +126,33 @@ with tab1:
             st.markdown(f"<h1 style='text-align:center; color:{col_p2}'>{d['p2_score']}%</h1>", unsafe_allow_html=True)
             st.markdown(f"<h3 style='text-align:center'>{d['p2_name']}</h3>", unsafe_allow_html=True)
             st.progress(d['p2_score']/100)
-        st.info(d.get('reason'))
+        st.write("---")
+        st.markdown(f"### 📝 Report Tecnico\n{d.get('reason')}")
 
 # TAB 2
 with tab2:
     col_h, col_r = st.columns([5,1])
-    col_h.write("Le migliori occasioni per oggi.")
+    col_h.write("Le migliori occasioni (ATP/WTA).")
     if col_r.button("🔄 Aggiorna"):
         st.session_state.scout_data = None
         st.rerun()
 
     if st.session_state.scout_data is None and api_key:
-        prof = manual_profile if manual_profile != "Imposta da Chat" else "BILANCIATO"
-        res = run_advisor("list", "scout", prof, api_key)
-        st.session_state.scout_data = extract_json(res)
+        res = run_advisor("list", "scout", manual_profile, api_key)
+        data = extract_json(res)
+        if data and data.get("matches"): st.session_state.scout_data = data
 
     if st.session_state.scout_data and "matches" in st.session_state.scout_data:
         h1, h2, h3 = st.columns([3, 4, 2])
-        h1.caption("MATCH"); h2.caption("PROBABILITÀ"); h3.caption("BET")
+        h1.caption("MATCH / ORA"); h2.caption("PROBABILITÀ"); h3.caption("BET")
         st.divider()
-        
         for m in st.session_state.scout_data['matches']:
             r1, r2, r3 = st.columns([3, 4, 2])
             with r1:
                 st.write(f"**{m['p1']}** vs **{m['p2']}**")
-                st.caption(m.get('reason', '')[:50]+"...")
+                time_str = m.get('match_time', '')
+                if time_str: st.markdown(f"<span class='match-time'>🕒 {time_str}</span>", unsafe_allow_html=True)
+                st.caption(m.get('reason', '')[:60]+"...")
             with r2:
                 st.progress(m['p1_perc']/100)
                 st.progress(m['p2_perc']/100)
@@ -168,7 +161,7 @@ with tab2:
                 st.markdown(f"<div class='{css}' style='text-align:center; border-radius:5px; padding:5px; color:white;'><div>Punta {m['bet_on']}</div><div style='font-size:1.2em'>{m['odd_value']}</div></div>", unsafe_allow_html=True)
             st.divider()
 
-# CHAT
+# CHATBOT PROATTIVO
 st.divider()
 st.subheader("💬 Chat Esperto")
 for msg in st.session_state.chat_history:
@@ -180,9 +173,30 @@ if u := st.chat_input("Scrivi qui..."):
     else:
         st.session_state.chat_history.append(HumanMessage(content=u))
         st.chat_message("user").write(u)
+        
         llm = ChatGroq(temperature=0.7, groq_api_key=api_key, model_name="llama-3.3-70b-versatile")
-        ctx = json.dumps(st.session_state.scout_data) if st.session_state.scout_data else ""
-        chain = ChatPromptTemplate.from_template("Ctx:{ctx}. User:{u}. Rispondi.") | llm | StrOutputParser()
-        ans = chain.invoke({"ctx":ctx, "u":u})
+        
+        matches_list = st.session_state.scout_data['matches'] if st.session_state.scout_data else []
+        matches_str = json.dumps(matches_list) if matches_list else "NESSUNA LISTA."
+        
+        prompt_chat = """
+        Sei un Consulente Scommesse molto curioso e professionale.
+        LISTA SCOMMESSE DISPONIBILI: {matches}
+        MESSAGGIO UTENTE: "{u}"
+        
+        ISTRUZIONI:
+        1. Rispondi all'utente basandoti sulla lista o sulla sua richiesta.
+        2. IMPORTANTE: Non chiudere MAI la conversazione. 
+        3. OBBLIGATORIO: Termina OGNI tua risposta con una NUOVA DOMANDA per profilare meglio l'utente.
+           Esempi di domande da fare:
+           - "Ti piacciono le scommesse sui set?"
+           - "Preferisci puntare sugli Over/Under?"
+           - "Segui solo i Grandi Slam o anche i Challenger?"
+           - "Ti fidi di più delle statistiche o dell'intuito?"
+        """
+        
+        chain = ChatPromptTemplate.from_template(prompt_chat) | llm | StrOutputParser()
+        ans = chain.invoke({"matches":matches_str, "u":u})
+        
         st.session_state.chat_history.append(AIMessage(content=ans))
         st.chat_message("assistant").write(ans)
